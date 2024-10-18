@@ -1,6 +1,6 @@
-# Rede Mesh com ESPs Usando painlessMesh
+# Rede ad hoc com ESPs Usando painlessMesh
 
-Este projeto implementa uma rede mesh dinâmica com ESPs, utilizando a biblioteca **painlessMesh**. A rede é capaz de rotear mensagens de nós emissores até um nó central de recebimento, adaptando-se automaticamente a novos nós e desconexões.
+Este projeto implementa uma rede ad hoc dinâmica com ESPs, utilizando a biblioteca **painlessMesh**. A rede é capaz de rotear mensagens de nós emissores até um nó central de recebimento, adaptando-se automaticamente a novos nós e desconexões.
 
 ## Funcionalidades
 
