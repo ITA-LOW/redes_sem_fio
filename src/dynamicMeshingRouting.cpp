@@ -1,131 +1,154 @@
-#include "DynamicMeshingRouting.h"
+#include "dynamicMeshingRouting.h"
 
-DynamicMeshingRouting::DynamicMeshingRouting() 
-    : taskSendMessage(TASK_SECOND * 5, TASK_FOREVER, [this](){ sendMessage(mesh.getNodeId()); }) {}
+// Inicializa a rede mesh
+dynamicMeshingRouting* dynamicMeshingRouting::instance = nullptr;
 
-void DynamicMeshingRouting::setup(uint32_t fixedNodeId) {
-    Serial.begin(115200);
-    mesh.init(MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT);
-    mesh.onReceive([this](uint32_t from, String &msg){ receivedCallback(from, msg); });
-    mesh.onNewConnection([this](uint32_t nodeId){ newConnectionCallback(nodeId); });
-    mesh.onDroppedConnection([this](uint32_t nodeId){ droppedConnectionCallback(nodeId); });
-
-    userScheduler.addTask(taskSendMessage);
-    taskSendMessage.enable();
+void dynamicMeshingRouting::init() {
+    instance = this;
+    mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);
+    mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
+    mesh.onReceive(onReceiveStatic); // Define o callback para receber mensagens
+    initCosts(); // Inicializa os custos da rede
 }
 
-void DynamicMeshingRouting::loop() {
-    mesh.update();
+void dynamicMeshingRouting::loop() {
+    mesh.update(); // Atualiza a rede mesh
 }
 
-void DynamicMeshingRouting::sendMessage(uint32_t nodeId) {
-    uint32_t centralNodeId = NODE_6_ID; // Definindo o nó central como o nó receptor
-    uint32_t nextNode = findBestPath(nodeId, centralNodeId); // Encontra o melhor caminho
+void dynamicMeshingRouting::setReceiverNode(uint32_t nodeId) {
+    receiverNodeId = nodeId; // Define o nó receptor
+}
 
-    if (nextNode != -1) {
-        String msg = "Hello from Node " + String(nodeId);  // Mensagem do nó
-        mesh.sendSingle(nextNode, msg); // Envia para o próximo nó
-        Serial.printf("Node %u sending message to node %u\n", nodeId, nextNode);
-        increaseCost(nodeId, nextNode); // Aumenta o custo da aresta
-    } else {
-        Serial.println("No nodes available for sending messages.");
+void dynamicMeshingRouting::initCosts() {
+    for (const auto& node : graph.getAdjacencyList(mesh.getNodeId())) {
+        graph.setCost(mesh.getNodeId(), node.first, 1); // Define custo 1 para cada aresta
     }
 }
 
-void DynamicMeshingRouting::receivedCallback(uint32_t from, String &msg) {
-    Serial.printf("Received from node %u: %s\n", from, msg.c_str());
-
-    // Se a mensagem foi recebida no nó receptor (nó central)
-    if (mesh.getNodeId() == NODE_6_ID) {
-        Serial.println("Message received at node 6 (central): " + msg);
-        // Imprime o caminho percorrido
-        printPath(from, NODE_6_ID);
-    }
+void dynamicMeshingRouting::updateEdgeCost(uint32_t fromNode, uint32_t toNode) {
+    graph.incrementCost(fromNode, toNode); // Corrigido para usar incrementCost
 }
 
-void DynamicMeshingRouting::newConnectionCallback(uint32_t nodeId) {
-    Serial.printf("New connection with node %u\n", nodeId);
-    initializeNodeCosts(nodeId);
-}
+uint32_t dynamicMeshingRouting::getMinCostNode() {
+    uint32_t minNode = 0;
+    int minCost = INFINITY_COST;
 
-void DynamicMeshingRouting::droppedConnectionCallback(uint32_t nodeId) {
-    Serial.printf("Node %u disconnected\n", nodeId);
-    removeNodeCosts(nodeId);
-}
-
-uint32_t DynamicMeshingRouting::findBestPath(uint32_t from, uint32_t to) {
-    std::map<uint32_t, int> distances; // Distâncias de cada nó
-    std::map<uint32_t, uint32_t> previous; // Nó anterior para rastrear o caminho
-    std::vector<uint32_t> unvisited; // Nós não visitados
-
-    for (const auto &node : mesh.getNodeList()) {
-        distances[node] = (node == from) ? 0 : INT_MAX; // Distância inicial
-        unvisited.push_back(node);
+    for (const auto& node : graph.getAdjacencyList(mesh.getNodeId())) {
+        if (node.second < minCost) {
+            minCost = node.second;
+            minNode = node.first;
+        }
     }
 
-    while (!unvisited.empty()) {
-        uint32_t currentNode = unvisited.front();
-        for (auto node : unvisited) {
-            if (distances[node] < distances[currentNode]) {
-                currentNode = node;
+    if (minNode != 0 && previousNode.find(minNode) != previousNode.end()) {
+        uint32_t previous = previousNode[minNode];
+        incrementRouteCost(previous, minNode);
+    }
+
+    return minNode;
+}
+
+void dynamicMeshingRouting::incrementRouteCost(uint32_t fromNode, uint32_t toNode) {
+    graph.incrementCost(fromNode, toNode);
+}
+
+void Graph::addEdge(uint32_t from, uint32_t to, int cost) {
+    adjacencyList[from][to] = cost;
+}
+
+int Graph::getCost(uint32_t from, uint32_t to) {
+    if (adjacencyList.find(from) != adjacencyList.end() &&
+        adjacencyList[from].find(to) != adjacencyList[from].end()) {
+        return adjacencyList[from][to];
+    }
+    return INFINITY_COST; // Retorna custo "infinito" se não houver aresta
+}
+
+void Graph::setCost(uint32_t from, uint32_t to, int newCost) {
+    adjacencyList[from][to] = newCost; // Atualiza o custo da aresta
+}
+
+void Graph::incrementCost(uint32_t from, uint32_t to) {
+    int currentCost = getCost(from, to);
+    setCost(from, to, currentCost + 1); // Incrementa o custo
+}
+
+const std::unordered_map<uint32_t, int>& Graph::getAdjacencyList(uint32_t node) {
+    static const std::unordered_map<uint32_t, int> empty; // Valor de retorno padrão se o nó não existir
+    auto it = adjacencyList.find(node);
+    return (it != adjacencyList.end()) ? it->second : empty;
+}
+
+void dynamicMeshingRouting::calculateShortestPath(uint32_t targetNode) {
+    // Define o custo inicial como infinito para todos os nós
+    std::unordered_map<uint32_t, int> distance;
+    std::unordered_map<uint32_t, uint32_t> previous;
+    for (const auto& node : graph.getAdjacencyList(mesh.getNodeId())) {
+        distance[node.first] = INFINITY_COST;
+    }
+    distance[mesh.getNodeId()] = 0;
+
+    // Usamos uma fila de prioridade para gerenciar os nós a serem processados
+    using NodeCostPair = std::pair<int, uint32_t>;
+    std::priority_queue<NodeCostPair, std::vector<NodeCostPair>, std::greater<NodeCostPair>> pq;
+    pq.push({0, mesh.getNodeId()});
+
+    while (!pq.empty()) {
+        auto [cost, currentNode] = pq.top();
+        pq.pop();
+
+        // Se alcançamos o nó alvo, finalizamos o caminho
+        if (currentNode == targetNode) break;
+
+        // Itera sobre os vizinhos do nó atual
+        for (const auto& neighbor : graph.getAdjacencyList(currentNode)) {
+            int newDist = cost + neighbor.second;
+            if (newDist < distance[neighbor.first]) {
+                distance[neighbor.first] = newDist;
+                previous[neighbor.first] = currentNode;
+                pq.push({newDist, neighbor.first});
             }
         }
-
-        unvisited.erase(std::remove(unvisited.begin(), unvisited.end(), currentNode), unvisited.end());
-
-        if (currentNode == to) {
-            paths[to].push_back(previous[to]);
-            return currentNode;
-        }
-
-        for (const auto &neighbor : costs[currentNode]) {
-            int newDist = distances[currentNode] + neighbor.second; 
-            if (newDist < distances[neighbor.first]) {
-                distances[neighbor.first] = newDist;
-                previous[neighbor.first] = currentNode; 
-            }
-        }
     }
 
-    return -1; 
+    // Armazena o caminho encontrado em uma lista para uso posterior
+    pathToTarget.clear();
+    uint32_t step = targetNode;
+    while (step != mesh.getNodeId() && previous.find(step) != previous.end()) {
+        pathToTarget.push_front(step);
+        step = previous[step];
+    }
+    pathToTarget.push_front(mesh.getNodeId()); // Adiciona o nó inicial
 }
 
-void DynamicMeshingRouting::increaseCost(uint32_t from, uint32_t to) {
-    costs[from][to] += random(1, 5); 
-    costs[to][from] = costs[from][to]; 
+void dynamicMeshingRouting::sendMessage(String message, uint32_t targetNode) {
+    // Calcula o caminho para o nó alvo
+    calculateShortestPath(targetNode);
+
+    // Se o caminho está vazio ou apenas contém o nó atual, a mensagem já está no nó receptor
+    if (pathToTarget.size() <= 1) {
+        Serial.println("Mensagem já no nó receptor.");
+        return;
+    }
+
+    // O próximo nó na rota
+    uint32_t nextNode = *(++pathToTarget.begin());
+    mesh.sendSingle(nextNode, message);
+
+    Serial.println("[Nó " + String(mesh.getNodeId()).substring(String(mesh.getNodeId()).length() - 4) + "] Enviando mensagem: \"" + message + "\" para o nó " + String(nextNode).substring(nextNode - 4));
 }
 
-void DynamicMeshingRouting::initializeNodeCosts(uint32_t newNode) {
-    for (auto &entry : costs) {
-        costs[newNode][entry.first] = random(5, 15); 
-        costs[entry.first][newNode] = costs[newNode][entry.first];
-    }
-}
+void dynamicMeshingRouting::receivedCallback(uint32_t from, String &msg) {
+    Serial.println("[Nó " + String(mesh.getNodeId()).substring(String(mesh.getNodeId()).length() - 4) + "] Recebida mensagem de " + String(from).substring(from - 4) + ": " + msg);
 
-void DynamicMeshingRouting::removeNodeCosts(uint32_t nodeId) {
-    costs.erase(nodeId);
-    for (auto &entry : costs) {
-        entry.second.erase(nodeId);
+    // Verifica se este nó é o nó receptor final
+    if (mesh.getNodeId() == receiverNodeId) {
+        Serial.println("[Nó " + String(mesh.getNodeId()) + "] Nó receptor recebeu: \"" + msg + "\"");
+        return;
     }
-    Serial.printf("Node %u removed from cost matrix\n", nodeId);
-}
 
-void DynamicMeshingRouting::printPath(uint32_t from, uint32_t to) {
-    std::vector<uint32_t> path;
-    uint32_t current = to;
-
-    while (current != from) {
-        path.push_back(current);
-        current = paths[current].back(); 
+    // Continua enviando a mensagem ao próximo nó na rota
+    if (!pathToTarget.empty()) {
+        sendMessage(msg, receiverNodeId);
     }
-    path.push_back(from); 
-
-    Serial.print("Path: ");
-    for (auto it = path.rbegin(); it != path.rend(); ++it) {
-        Serial.print(*it);
-        if (it + 1 != path.rend()) {
-            Serial.print(" -> ");
-        }
-    }
-    Serial.println();
 }

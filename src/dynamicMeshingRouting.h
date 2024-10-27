@@ -1,45 +1,52 @@
-#ifndef DYNAMIC_MESHING_ROUTING_H
-#define DYNAMIC_MESHING_ROUTING_H
+#ifndef DYNAMICMESHINGROUTING_H
+#define DYNAMICMESHINGROUTING_H
 
-#include "painlessMesh.h"
-#include <map>
-#include <vector>
+#include <painlessMesh.h>
+#include <unordered_map>
+#include <queue>
+#include <limits>
 
-#define MESH_PREFIX     "meshNetwork"
-#define MESH_PASSWORD   "securePassword"
-#define MESH_PORT       5555
+#define MESH_PREFIX "YourMeshName" // Nome da rede mesh
+#define MESH_PASSWORD "YourPassword" // Senha da rede mesh
+#define MESH_PORT 5555 // Porta para comunicação
 
-// Defina os IDs fixos para os dispositivos
-#define NODE_1_ID 1 // ID para o nó emissor
-#define NODE_2_ID 2
-#define NODE_3_ID 3
-#define NODE_4_ID 4
-#define NODE_5_ID 5
-#define NODE_6_ID 6 // ID para o nó receptor
+const int INFINITY_COST = 99999; // Valor que representa um custo infinito
 
-class DynamicMeshingRouting {
+class Graph {
 public:
-    DynamicMeshingRouting();
-    void setup(uint32_t fixedNodeId);  // Setup com ID fixo
-    void loop();
+    void addEdge(uint32_t from, uint32_t to, int cost);
+    int getCost(uint32_t from, uint32_t to);
+    void setCost(uint32_t from, uint32_t to, int newCost);
+    void incrementCost(uint32_t from, uint32_t to);
+    const std::unordered_map<uint32_t, int>& getAdjacencyList(uint32_t node);
 
 private:
-    Scheduler userScheduler;
-    painlessMesh mesh;
-    Task taskSendMessage;
-
-    std::map<uint32_t, std::map<uint32_t, int>> costs; // Custo das arestas
-    std::map<uint32_t, std::vector<uint32_t>> paths; // Caminhos percorridos
-
-    void sendMessage(uint32_t nodeId);
-    void receivedCallback(uint32_t from, String &msg);
-    void newConnectionCallback(uint32_t nodeId);
-    void droppedConnectionCallback(uint32_t nodeId);
-    uint32_t findBestPath(uint32_t from, uint32_t to);  // Implementação do algoritmo de Dijkstra
-    void increaseCost(uint32_t from, uint32_t to);
-    void initializeNodeCosts(uint32_t newNode);
-    void removeNodeCosts(uint32_t nodeId);
-    void printPath(uint32_t from, uint32_t to); // Método para imprimir o caminho percorrido
+    std::unordered_map<uint32_t, std::unordered_map<uint32_t, int>> adjacencyList;
 };
 
-#endif // DYNAMIC_MESHING_ROUTING_H
+class dynamicMeshingRouting {
+public:
+    void init();
+    void loop();
+    void receivedCallback(uint32_t from, String &msg);
+    void calculateShortestPath(uint32_t targetNode);
+    void setReceiverNode(uint32_t nodeId);
+    void initCosts();
+    void updateEdgeCost(uint32_t fromNode, uint32_t toNode);
+    painlessMesh mesh;
+    Graph graph;
+    uint32_t receiverNodeId;
+    std::unordered_map<uint32_t, uint32_t> previousNode;
+    std::deque<uint32_t> pathToTarget;
+    uint32_t getMinCostNode();
+    void sendMessage(String message, uint32_t targetNode);
+    void incrementRouteCost(uint32_t fromNode, uint32_t toNode);
+    
+    static void onReceiveStatic(uint32_t from, String &msg) {
+        instance->receivedCallback(from, msg);
+    }
+    
+    static dynamicMeshingRouting *instance; // Instância estática
+};
+
+#endif // DYNAMICMESHINGROUTING_H
