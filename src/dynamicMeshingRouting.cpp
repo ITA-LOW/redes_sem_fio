@@ -73,6 +73,16 @@ void Graph::incrementCost(uint32_t from, uint32_t to) {
     setCost(from, to, currentCost + 1); // Incrementa o custo
 }
 
+void Graph::removeNode(uint32_t node) {
+    // Remove todas as arestas conectadas ao nó a ser removido
+    adjacencyList.erase(node); // Remove o nó do grafo
+
+    // Remove qualquer referência ao nó nos adjacentes
+    for (auto& [from, neighbors] : adjacencyList) {
+        neighbors.erase(node); // Remove a aresta do nó adjacente
+    }
+}
+
 const std::unordered_map<uint32_t, int>& Graph::getAdjacencyList(uint32_t node) {
     static const std::unordered_map<uint32_t, int> empty; // Valor de retorno padrão se o nó não existir
     auto it = adjacencyList.find(node);
@@ -151,4 +161,32 @@ void dynamicMeshingRouting::receivedCallback(uint32_t from, String &msg) {
     if (!pathToTarget.empty()) {
         sendMessage(msg, receiverNodeId);
     }
+}
+
+void dynamicMeshingRouting::handleNodeEntry(uint32_t nodeId) {
+    // Adiciona o novo nó ao grafo e define as conexões iniciais
+    for (const auto& neighbor : mesh.getNodeList()) {
+        if (neighbor != nodeId) {
+            graph.addEdge(nodeId, neighbor, 1); // Define o custo inicial como 1 para novos nós
+            graph.addEdge(neighbor, nodeId, 1); // Define a conexão bidirecional
+        }
+    }
+    // Recalcula os custos das rotas, considerando o novo nó
+    initCosts();
+    Serial.println("Novo nó " + String(nodeId) + " adicionado à rede.");
+}
+
+void dynamicMeshingRouting::handleNodeExit(uint32_t nodeId) {
+    // Remove todas as conexões relacionadas ao nó que saiu
+    for (const auto& neighbor : graph.getAdjacencyList(nodeId)) {
+        graph.setCost(nodeId, neighbor.first, INFINITY_COST); // Define o custo como infinito
+        graph.setCost(neighbor.first, nodeId, INFINITY_COST); // Remove a conexão bidirecional
+    }
+
+    // Remove o nó do grafo (opcional, dependendo da implementação do grafo)
+    graph.removeNode(nodeId);
+
+    // Recalcula as rotas e custos, considerando a saída do nó
+    initCosts();
+    Serial.println("Nó " + String(nodeId) + " removido da rede.");
 }

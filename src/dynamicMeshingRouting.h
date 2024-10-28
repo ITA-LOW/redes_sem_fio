@@ -19,6 +19,7 @@ public:
     void setCost(uint32_t from, uint32_t to, int newCost);
     void incrementCost(uint32_t from, uint32_t to);
     const std::unordered_map<uint32_t, int>& getAdjacencyList(uint32_t node);
+    void removeNode(uint32_t node);
 
 private:
     std::unordered_map<uint32_t, std::unordered_map<uint32_t, int>> adjacencyList;
@@ -41,7 +42,8 @@ public:
     uint32_t getMinCostNode();
     void sendMessage(String message, uint32_t targetNode);
     void incrementRouteCost(uint32_t fromNode, uint32_t toNode);
-    
+    void handleNodeEntry(uint32_t nodeId);
+    void handleNodeExit(uint32_t nodeId);
     static void onReceiveStatic(uint32_t from, String &msg) {
         instance->receivedCallback(from, msg);
     }
