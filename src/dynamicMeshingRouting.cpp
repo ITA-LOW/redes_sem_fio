@@ -153,7 +153,7 @@ void dynamicMeshingRouting::receivedCallback(uint32_t from, String &msg) {
 
     // Verifica se este nó é o nó receptor final
     if (mesh.getNodeId() == receiverNodeId) {
-        Serial.println("[Nó " + String(mesh.getNodeId()) + "] Nó receptor recebeu: \"" + msg + "\"");
+        Serial.println("[Nó " + String(mesh.getNodeId()).substring(String(mesh.getNodeId()).length() - 4) + "] Nó receptor recebeu: \"" + msg + "\"");
         return;
     }
 
@@ -173,7 +173,7 @@ void dynamicMeshingRouting::handleNodeEntry(uint32_t nodeId) {
     }
     // Recalcula os custos das rotas, considerando o novo nó
     initCosts();
-    Serial.println("Novo nó " + String(nodeId) + " adicionado à rede.");
+    Serial.println("Novo nó " + String(nodeId).substring(String(mesh.getNodeId()).length() - 4) + " adicionado à rede.");
 }
 
 void dynamicMeshingRouting::handleNodeExit(uint32_t nodeId) {
@@ -188,5 +188,5 @@ void dynamicMeshingRouting::handleNodeExit(uint32_t nodeId) {
 
     // Recalcula as rotas e custos, considerando a saída do nó
     initCosts();
-    Serial.println("Nó " + String(nodeId) + " removido da rede.");
+    Serial.println("Nó " + String(nodeId).substring(String(mesh.getNodeId()).length() - 4) + " removido da rede.");
 }
