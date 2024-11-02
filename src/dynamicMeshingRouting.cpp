@@ -1,18 +1,30 @@
 #include "dynamicMeshingRouting.h"
+#include <TaskScheduler.h> // Move a inclusão para o arquivo .cpp
 
 // Inicializa a rede mesh
 dynamicMeshingRouting* dynamicMeshingRouting::instance = nullptr;
 
+dynamicMeshingRouting::dynamicMeshingRouting() 
+    : taskSendMessage(TASK_SECOND * 5, TASK_FOREVER, [this]() { 
+        if (receiverNodeId != mesh.getNodeId()) { // Certifique-se de que não envia a si mesmo
+            sendMessage("Mensagem automática", receiverNodeId); 
+        }
+    }) 
+{}
+
 void dynamicMeshingRouting::init() {
     instance = this;
-    mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);
     mesh.init(MESH_PREFIX, MESH_PASSWORD, MESH_PORT);
     mesh.onReceive(onReceiveStatic); // Define o callback para receber mensagens
     initCosts(); // Inicializa os custos da rede
+    
+    scheduler.addTask(taskSendMessage); // Adiciona a tarefa de envio de mensagens ao agendador
+    taskSendMessage.enable(); // Habilita a tarefa para que comece a ser executada
 }
 
 void dynamicMeshingRouting::loop() {
     mesh.update(); // Atualiza a rede mesh
+    scheduler.execute(); // Executa o agendador para verificar tarefas ativas
 }
 
 void dynamicMeshingRouting::setReceiverNode(uint32_t nodeId) {
@@ -90,77 +102,73 @@ const std::unordered_map<uint32_t, int>& Graph::getAdjacencyList(uint32_t node) 
 }
 
 void dynamicMeshingRouting::calculateShortestPath(uint32_t targetNode) {
-    // Define o custo inicial como infinito para todos os nós
-    std::unordered_map<uint32_t, int> distance;
+    std::unordered_map<uint32_t, int> costs;
     std::unordered_map<uint32_t, uint32_t> previous;
-    for (const auto& node : graph.getAdjacencyList(mesh.getNodeId())) {
-        distance[node.first] = INFINITY_COST;
+    std::priority_queue<std::pair<int, uint32_t>, std::vector<std::pair<int, uint32_t>>, std::greater<std::pair<int, uint32_t>>> queue;
+
+    // Inicialização
+    for (const auto &node : graph.getAdjacencyList(currentNode)) {
+        costs[node.first] = INFINITY_COST;
+        previous[node.first] = UINT32_MAX; // Indica que não há anterior
     }
-    distance[mesh.getNodeId()] = 0;
 
-    // Usamos uma fila de prioridade para gerenciar os nós a serem processados
-    using NodeCostPair = std::pair<int, uint32_t>;
-    std::priority_queue<NodeCostPair, std::vector<NodeCostPair>, std::greater<NodeCostPair>> pq;
-    pq.push({0, mesh.getNodeId()});
+    costs[receiverNodeId] = 0;
+    queue.push({0, receiverNodeId});
 
-    while (!pq.empty()) {
-        auto [cost, currentNode] = pq.top();
-        pq.pop();
+    while (!queue.empty()) {
+        uint32_t currentNode = queue.top().second;
+        queue.pop();
 
-        // Se alcançamos o nó alvo, finalizamos o caminho
-        if (currentNode == targetNode) break;
+        if (currentNode == targetNode) break; // Caminho encontrado
 
-        // Itera sobre os vizinhos do nó atual
-        for (const auto& neighbor : graph.getAdjacencyList(currentNode)) {
-            int newDist = cost + neighbor.second;
-            if (newDist < distance[neighbor.first]) {
-                distance[neighbor.first] = newDist;
+        for (const auto &neighbor : graph.getAdjacencyList(currentNode)) {
+            int newCost = costs[currentNode] + neighbor.second;
+            if (newCost < costs[neighbor.first]) {
+                costs[neighbor.first] = newCost;
                 previous[neighbor.first] = currentNode;
-                pq.push({newDist, neighbor.first});
+                queue.push({newCost, neighbor.first});
             }
         }
     }
 
-    // Armazena o caminho encontrado em uma lista para uso posterior
+    // Reconstrução do caminho
     pathToTarget.clear();
-    uint32_t step = targetNode;
-    while (step != mesh.getNodeId() && previous.find(step) != previous.end()) {
-        pathToTarget.push_front(step);
-        step = previous[step];
+    for (uint32_t at = targetNode; at != UINT32_MAX; at = previous[at]) {
+        pathToTarget.push_front(at);
     }
-    pathToTarget.push_front(mesh.getNodeId()); // Adiciona o nó inicial
+
+    // Verifica se encontramos um caminho válido
+    if (pathToTarget.size() <= 1) {
+        Serial.println("Caminho não encontrado.");
+    } else {
+        Serial.print("Caminho encontrado: ");
+        for (const auto &node : pathToTarget) {
+            Serial.print(node);
+            Serial.print(" ");
+        }
+        Serial.println();
+
+        // Incrementa o custo das arestas usadas
+        for (size_t i = 0; i < pathToTarget.size() - 1; ++i) {
+            uint32_t fromNode = pathToTarget[i];
+            uint32_t toNode = pathToTarget[i + 1];
+            graph.incrementCost(fromNode, toNode); // Incrementa o custo da aresta
+        }
+    }
 }
 
 void dynamicMeshingRouting::sendMessage(String message, uint32_t targetNode) {
-    // Calcula o caminho para o nó alvo
     calculateShortestPath(targetNode);
-
-    // Se o caminho está vazio ou apenas contém o nó atual, a mensagem já está no nó receptor
     if (pathToTarget.size() <= 1) {
-        Serial.println("Mensagem já no nó receptor.");
+        Serial.println("A mensagem já está no nó receptor.");
         return;
     }
 
-    // O próximo nó na rota
-    uint32_t nextNode = *(++pathToTarget.begin());
-    mesh.sendSingle(nextNode, message);
-
-    Serial.println("[Nó " + String(mesh.getNodeId()).substring(String(mesh.getNodeId()).length() - 4) + "] Enviando mensagem: \"" + message + "\" para o nó " + String(nextNode).substring(nextNode - 4));
-}
-
-void dynamicMeshingRouting::receivedCallback(uint32_t from, String &msg) {
-    Serial.println("[Nó " + String(mesh.getNodeId()).substring(String(mesh.getNodeId()).length() - 4) + "] Recebida mensagem de " + String(from).substring(from - 4) + ": " + msg);
-
-    // Verifica se este nó é o nó receptor final
-    if (mesh.getNodeId() == receiverNodeId) {
-        Serial.println("[Nó " + String(mesh.getNodeId()).substring(String(mesh.getNodeId()).length() - 4) + "] Nó receptor recebeu: \"" + msg + "\"");
-        return;
-    }
-
-    // Continua enviando a mensagem ao próximo nó na rota
-    if (!pathToTarget.empty()) {
-        sendMessage(msg, receiverNodeId);
-    }
+    // Envia a mensagem para o próximo nó no caminho
+    uint32_t nextNode = pathToTarget[1]; // O primeiro nó após o receptor
+    sendMessage(message,nextNode);
+    Serial.print("Mensagem enviada para o nó: ");
+    Serial.println(nextNode);
 }
 
 void dynamicMeshingRouting::handleNodeEntry(uint32_t nodeId) {

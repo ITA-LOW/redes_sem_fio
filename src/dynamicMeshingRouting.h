@@ -6,11 +6,11 @@
 #include <queue>
 #include <limits>
 
-#define MESH_PREFIX "YourMeshName" // Nome da rede mesh
-#define MESH_PASSWORD "YourPassword" // Senha da rede mesh
-#define MESH_PORT 5555 // Porta para comunicação
+#define MESH_PREFIX "YourMeshName"
+#define MESH_PASSWORD "YourPassword"
+#define MESH_PORT 5555
 
-const int INFINITY_COST = 99999; // Valor que representa um custo infinito
+const int INFINITY_COST = 99999;
 
 class Graph {
 public:
@@ -27,28 +27,35 @@ private:
 
 class dynamicMeshingRouting {
 public:
+    dynamicMeshingRouting();
     void init();
+    void setup(uint32_t fixedNodeId);
     void loop();
     void receivedCallback(uint32_t from, String &msg);
     void calculateShortestPath(uint32_t targetNode);
     void setReceiverNode(uint32_t nodeId);
     void initCosts();
     void updateEdgeCost(uint32_t fromNode, uint32_t toNode);
+    void sendMessage(String message, uint32_t targetNode);
+    void incrementRouteCost(uint32_t fromNode, uint32_t toNode);
+    void handleNodeEntry(uint32_t nodeId);
+    void handleNodeExit(uint32_t nodeId);
+
+    static void onReceiveStatic(uint32_t from, String &msg) {
+        instance->receivedCallback(from, msg);
+    }
+
+    static dynamicMeshingRouting *instance;
+
     painlessMesh mesh;
     Graph graph;
     uint32_t receiverNodeId;
     std::unordered_map<uint32_t, uint32_t> previousNode;
     std::deque<uint32_t> pathToTarget;
     uint32_t getMinCostNode();
-    void sendMessage(String message, uint32_t targetNode);
-    void incrementRouteCost(uint32_t fromNode, uint32_t toNode);
-    void handleNodeEntry(uint32_t nodeId);
-    void handleNodeExit(uint32_t nodeId);
-    static void onReceiveStatic(uint32_t from, String &msg) {
-        instance->receivedCallback(from, msg);
-    }
-    
-    static dynamicMeshingRouting *instance; // Instância estática
+
+    Task taskSendMessage;
+    Scheduler scheduler;
 };
 
 #endif // DYNAMICMESHINGROUTING_H
