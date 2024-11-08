@@ -104,8 +104,17 @@ uint32_t DynamicMeshingRouting::findBestPath(uint32_t from, uint32_t to) {
         unvisited.erase(std::remove(unvisited.begin(), unvisited.end(), currentNode), unvisited.end());
 
         if (currentNode == to) {
-            paths[to].push_back(previous[to]);
-            return currentNode;
+            // Reconstruir o caminho completo de "to" até "from" usando o mapa `previous`
+            std::vector<uint32_t> fullPath;
+            while (currentNode != from) {
+                fullPath.push_back(currentNode);
+                currentNode = previous[currentNode];
+            }
+            fullPath.push_back(from);  // Adicionar o nó de partida
+            std::reverse(fullPath.begin(), fullPath.end());  // Inverter para obter a trajetória do início ao fim
+
+            paths[to] = fullPath;  // Armazenar o caminho completo em `paths[to]`
+            return to;
         }
 
         for (const auto &neighbor : costs[currentNode]) {
@@ -117,8 +126,73 @@ uint32_t DynamicMeshingRouting::findBestPath(uint32_t from, uint32_t to) {
         }
     }
 
-    return -1;
+    return -1;  // Retorna -1 se não encontrar um caminho
 }
+
+/* talvez essa linha consiga imprimir a rota
+uint32_t DynamicMeshingRouting::findBestPath(uint32_t from, uint32_t to) {
+    std::map<uint32_t, int> distances;
+    std::map<uint32_t, uint32_t> previous;
+    std::vector<uint32_t> unvisited;
+
+    for (const auto &node : mesh.getNodeList()) {
+        distances[node] = (node == from) ? 0 : INT_MAX;
+        unvisited.push_back(node);
+    }
+
+    while (!unvisited.empty()) {
+        uint32_t currentNode = unvisited.front();
+        for (auto node : unvisited) {
+            if (distances[node] < distances[currentNode]) {
+                currentNode = node;
+            }
+        }
+
+        unvisited.erase(std::remove(unvisited.begin(), unvisited.end(), currentNode), unvisited.end());
+
+        if (currentNode == to) {
+            // Reconstruir o caminho completo de "to" até "from" usando o mapa `previous`
+            std::vector<uint32_t> fullPath;
+            while (currentNode != from) {
+                fullPath.push_back(currentNode);
+                currentNode = previous[currentNode];
+            }
+            fullPath.push_back(from);  // Adicionar o nó de partida
+            std::reverse(fullPath.begin(), fullPath.end());  // Inverter para obter a trajetória do início ao fim
+
+            paths[to] = fullPath;  // Armazenar o caminho completo em `paths[to]`
+
+            // Imprimir o caminho completo
+            Serial.print("Caminho completo de ");
+            Serial.print(from);
+            Serial.print(" até ");
+            Serial.print(to);
+            Serial.print(": ");
+            for (const auto& node : fullPath) {
+                Serial.print(node);
+                if (node != to) {
+                    Serial.print(" -> ");
+                }
+            }
+            Serial.println();
+
+            return to;
+        }
+
+        for (const auto &neighbor : costs[currentNode]) {
+            int newDist = distances[currentNode] + neighbor.second; 
+            if (newDist < distances[neighbor.first]) {
+                distances[neighbor.first] = newDist;
+                previous[neighbor.first] = currentNode;
+            }
+        }
+    }
+
+    return -1;  // Retorna -1 se não encontrar um caminho
+}
+
+*/
+
 
 void DynamicMeshingRouting::increaseCost(uint32_t from, uint32_t to) {
     costs[from][to] += 1;
